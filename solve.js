@@ -244,7 +244,46 @@ export function run(input) {
         scanQuoted();
       } else {
         quoted = false;
-        scanPlain('');
+        // scanPlain('') inlined: the record loop's hot path pays no call
+        // for the common unquoted field. Same reads, same results.
+        let parts = null;
+        let seg = i;
+        for (;;) {
+          let j = i;
+          let c = -1; // the delimiter the scan stopped on (unused at EOF)
+          while (j < n) {
+            c = s.charCodeAt(j);
+            if (c === 44 || c === 10 || c === 13) break;
+            j++;
+          }
+          if (j >= n) {
+            const tail = s.slice(seg, j);
+            i = n;
+            fValue = parts === null ? tail : parts.join('') + tail;
+            fEnded = ENDED_EOF;
+            break;
+          }
+          if (c === 44) {
+            const tail = s.slice(seg, j);
+            i = j + 1;
+            fValue = parts === null ? tail : parts.join('') + tail;
+            fEnded = ENDED_COMMA;
+            break;
+          }
+          if (c === 10 || s.charCodeAt(j + 1) === 10) {
+            const tail = s.slice(seg, j);
+            i = j + (c === 10 ? 1 : 2);
+            line++;
+            fValue = parts === null ? tail : parts.join('') + tail;
+            fEnded = ENDED_BREAK;
+            break;
+          }
+          fail('stray_cr');
+          if (parts === null) parts = [];
+          parts.push(s.slice(seg, j));
+          i = j + 1;
+          seg = i;
+        }
       }
       fields.push(fValue);
     } while (fEnded === ENDED_COMMA);
